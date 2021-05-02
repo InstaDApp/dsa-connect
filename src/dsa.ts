@@ -13,19 +13,19 @@ import { Erc20 } from './utils/erc20'
 
 type DSAConfig =
   | {
-      web3: Web3
-      mode: 'node'
-      privateKey: string
-    }
+    web3: Web3
+    mode: 'node'
+    privateKey: string
+  }
   | {
-      web3: Web3
-      mode: 'simulation'
-      publicKey: string
-    }
+    web3: Web3
+    mode: 'simulation'
+    publicKey: string
+  }
   | {
-      web3: Web3
-      mode?: 'browser'
-    }
+    web3: Web3
+    mode?: 'browser'
+  }
 
 
 // ChainId 1 = mainnet, ChainId 137 = matic
@@ -34,7 +34,7 @@ type ChainId = 1 | 137;
 interface Instance {
   id: number
   address: string
-  version: Version 
+  version: Version
   chainId: ChainId
 }
 
@@ -98,7 +98,7 @@ export class DSA {
 
   // value of uint(-1).
   public readonly maxValue = '115792089237316195423570985008687907853269984665640564039457584007913129639935'
-  public readonly maxVal = () =>'115792089237316195423570985008687907853269984665640564039457584007913129639935'
+  public readonly maxVal = () => '115792089237316195423570985008687907853269984665640564039457584007913129639935'
 
   // Extensions
   readonly erc20 = new Erc20(this)
@@ -163,10 +163,10 @@ export class DSA {
       const [id, address, version] = await contract.methods.getAccountIdDetails(instanceId).call()
       const chainId = await this.web3.eth.getChainId();
 
-      return { 
-        id, 
-        address, 
-        version: parseInt(version) as Version, 
+      return {
+        id,
+        address,
+        version: parseInt(version) as Version,
         chainId: chainId as ChainId
       }
     } catch (err) {
@@ -233,11 +233,11 @@ export class DSA {
     const to = Addresses.core[this.instance.chainId].index
     const contract = new this.web3.eth.Contract(Abi.core.index, Addresses.core[this.instance.chainId].index)
     const data = contract.methods.build(
-      params.authority, 
+      params.authority,
       params.version || (this.instance.chainId != 1 ? 2 : 1),
       params.origin || Addresses.genesis,
     ).encodeABI()
-   
+
     return this.internal.getTransactionConfig({
       from: params.from,
       to,
@@ -326,7 +326,7 @@ export class DSA {
           console.log('No spells casted. Add spells with `.add(...)`.')
           return
         }
-        return await vm.castHelpers.estimateGas({spells: this, ...params})
+        return await vm.castHelpers.estimateGas({ spells: this, ...params })
       }
 
       encodeCastABI = async (params?: Omit<CastHelpers['encodeABI'], 'spells'>) => {
@@ -334,7 +334,7 @@ export class DSA {
           console.log('No spells casted. Add spells with `.add(...)`.')
           return
         }
-        return await vm.encodeCastABI({spells: this, ...params})
+        return await vm.encodeCastABI({ spells: this, ...params })
       }
 
       encodeSpells = async (params?: Omit<Internal['encodeSpells'], 'spells'>) => {
@@ -342,9 +342,9 @@ export class DSA {
           console.log('No spells casted. Add spells with `.add(...)`.')
           return
         }
-        return await vm.encodeSpells({spells: this, ...params})
+        return await vm.encodeSpells({ spells: this, ...params })
       }
-  })()
+    })()
   }
 
   async cast(params: Spells | CastParams) {
@@ -380,7 +380,7 @@ export class DSA {
   }
 
   private async getData(params: { spells: Spells; origin?: string }) {
-    const encodedSpells = this.internal.encodeSpells(params)
+    const encodedSpells = await this.internal.encodeSpells(params)
 
     const contract = new this.web3.eth.Contract(Abi.core.versions[this.instance.version].account, this.instance.address)
     const data = contract.methods

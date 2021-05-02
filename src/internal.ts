@@ -1,14 +1,15 @@
 import { TransactionConfig } from 'web3-core'
 import { AbiItem } from 'web3-utils'
+import SuperAgent from 'superagent';
 import DSA from '.'
-import { Abi } from './abi'
-import { Connector } from "./abi/connectors";
-import { Addresses } from './addresses'
+// import { Connector } from "./abi/connectors";
 import { TokenInfo } from './data/token-info'
 import { EstimatedGasException } from './exceptions/estimated-gas-exception'
 import { Spells } from './spells'
 import { hasKey } from './utils/typeHelper'
 import connectorV2Mapping from "./data/connectorsV2_M1_mapping";
+
+const DATA_URL = `https://raw.githubusercontent.com/Instadapp/dsa-connect-data/add-data`;
 
 export interface GetTransactionConfigParams {
   from: NonNullable<TransactionConfig['from']>
@@ -20,16 +21,62 @@ export interface GetTransactionConfigParams {
   nonce?: TransactionConfig['nonce']
 }
 
-export type Version = keyof typeof Abi.connectors.versions
-export { Connector } from './abi/connectors';
+export type Version = 1 | 2
+export enum VersionEnum {
+  V1 = 1,
+  V2 = 2,
+}
+export enum ChainEnum {
+  MAINNET = 1,
+  POLYGON = 137,
+}
+export type Connector = string;
 
 export type EstimateGasParams = {
   abi: AbiItem
   args: any
 } & Required<Pick<TransactionConfig, 'from' | 'to' | 'value'>>
 
+type AbiCache = {
+  [key in VersionEnum]: {
+    [key: string]: AbiItem[]
+  }
+}
+
+type AddressCache = {
+  [key in ChainEnum]: {
+    [key in VersionEnum]: {
+      [key: string]: {
+        address: string,
+        abiPath: string,
+      }
+    }
+  }
+}
+
 export class Internal {
-  constructor(private dsa: DSA) {}
+
+  constructor(private dsa: DSA) {
+  }
+
+
+  // init addressCache and abiCache
+  externalAddressCache: AddressCache = {
+    [ChainEnum.MAINNET]: {
+      [VersionEnum.V1]: {},
+      [VersionEnum.V2]: {}
+    },
+    [ChainEnum.POLYGON]: {
+      [VersionEnum.V1]: {},
+      [VersionEnum.V2]: {}
+    },
+  }
+  externalAbiCache: AbiCache = {
+    [VersionEnum.V1]: {},
+    [VersionEnum.V2]: {}
+  }
+
+
 
   /**
    * Returns TransactionObject for any calls.
@@ -97,19 +144,53 @@ export class Internal {
   /**
    * Returns encoded data of any calls.
    */
-  encodeMethod = (params: { connector: Connector; method: string; args: string[]}) => {
+  encodeMethod = (params: { connector: Connector; method: string; args: string[] }) => {
     const version = this.dsa.instance.version;
 
     // type check that object has the required properties
-    if (!(hasKey(Abi.connectors.versions, version) && hasKey(Abi.connectors.versions[version], params.connector))) {
+    if (!(hasKey(this.externalAbiCache, version) && hasKey(this.externalAbiCache[version], params.connector))) {
       throw new Error(`ConnectorInterface '${params.method}' not found`)
     }
 
     // Abi.connectors.versions[version]
-    const connectorInterface = this.getInterface(Abi.connectors.versions[version][params.connector], params.method)
+    const connectorInterface = this.getInterface(this.externalAbiCache[version][params.connector], params.method)
 
     if (!connectorInterface) throw new Error(`ConnectorInterface '${params.method}' not found`)
     return this.dsa.web3.eth.abi.encodeFunctionCall(connectorInterface, params.args)
+  }
+
+
+  async verifyAndCache(spells: Spells) {
+    const chainId = this.dsa.instance.chainId;
+    const version = this.dsa.instance.version;
+    // check if address cache exists
+    if (Object.keys(this.externalAddressCache[chainId][version]).length === 0) {
+      try {
+        const res = await SuperAgent.get(
+          `${DATA_URL}/chain-${chainId}/v${version}.json`
+        )
+        this.externalAddressCache[chainId][version] = JSON.parse(res.text);
+      } catch (e) {
+        throw new Error("Failed to fetch Addresses: " + e);
+      }
+    }
+
+    for (const spell of spells.data) {
+      // if ABI exists in cache, pass on
+      if (this.externalAbiCache[version][spell.connector]) {
+        continue;
+      }
+
+      try {
+        const res = await SuperAgent.get(
+          `${DATA_URL}/${this.externalAddressCache[chainId][version][spell.connector].abiPath}`
+        )
+
+        this.externalAbiCache[version][spell.connector] = JSON.parse(res.text);
+      } catch (e) {
+        throw new Error(`Failed to fetch ABI for connector: ${spell.connector}: ` + e);
+      }
+    }
   }
 
   /**
@@ -119,17 +200,18 @@ export class Internal {
    * OR
    * @param params.spells the spells instance
    */
-  encodeSpells = (params: Spells | { spells: Spells }) => {
+  encodeSpells = async (params: Spells | { spells: Spells }) => {
     let spells = this.dsa.castHelpers.flashBorrowSpellsConvert(this.getSpells(params))
 
     // Convert the spell.connector into required version. Eg: compound => COMPOUND-A for DSAv2
     spells.data = spells.data.map(spell => Number(this.dsa.instance.version) === 1 ?
-      {...spell, connector: spell.connector} :
-      hasKey(connectorV2Mapping, spell.connector) ? 
-        {...spell, connector: connectorV2Mapping[spell.connector] as Connector} :
-        {...spell, connector: spell.connector}
+      { ...spell, connector: spell.connector } :
+      hasKey(connectorV2Mapping, spell.connector) ?
+        { ...spell, connector: connectorV2Mapping[spell.connector] as Connector } :
+        { ...spell, connector: spell.connector }
     )
-    
+
+    await this.verifyAndCache(spells);
     const targets = spells.data.map((spell) => this.getTarget(spell.connector))
     const encodedMethods = spells.data.map((spell) => this.encodeMethod(spell))
 
@@ -149,13 +231,13 @@ export class Internal {
 
     // type check that object has the required properties
     if (
-      !(hasKey(Addresses.connectors.chains[chainId].versions, version) && 
-      hasKey(Addresses.connectors.chains[chainId].versions[version], connector))
+      !(hasKey(this.externalAddressCache[chainId], version) &&
+        hasKey(this.externalAddressCache[chainId][version], connector))
     ) {
       return console.error(`${connector} is invalid connector.`)
-    } 
+    }
 
-    const target = Addresses.connectors.chains[chainId].versions[version][connector]
+    const target = this.externalAddressCache[chainId][version][connector].address
 
     if (!target) return console.error(`${connector} is invalid connector.`)
 
@@ -170,7 +252,7 @@ export class Internal {
     if (this.dsa.config.mode == "node")
       return this.dsa.web3.eth.accounts.privateKeyToAccount(this.dsa.config.privateKey)
         .address;
-    else if (this.dsa.config.mode == "simulation") 
+    else if (this.dsa.config.mode == "simulation")
       return this.dsa.config.publicKey
 
     // otherwise, browser

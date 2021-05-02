@@ -11,7 +11,7 @@ type EncodeAbiParams = {
 } & Pick<TransactionConfig, 'to'>
 
 export class CastHelpers {
-  constructor(private dsa: DSA) {}
+  constructor(private dsa: DSA) { }
 
   /**
    * Returns the estimated gas cost.
@@ -32,7 +32,7 @@ export class CastHelpers {
         `Please configure the DSA instance by calling dsa.setInstance(dsaId). More details: https://docs.instadapp.io/setup`
       )
 
-    const { targets, spells } = this.dsa.internal.encodeSpells(params)
+    const { targets, spells } = await this.dsa.internal.encodeSpells(params)
     const args = [targets, spells, this.dsa.origin]
     let from = params.from;
     if (!from) {
@@ -41,14 +41,14 @@ export class CastHelpers {
     }
 
     const value = params.value ?? '0'
-    
+
     const abi = this.dsa.internal.getInterface(Abi.core.versions[this.dsa.instance.version].account, 'cast')
-   
+
     if (!abi) throw new Error('Abi is not defined.')
 
     const estimatedGas = await this.dsa.internal.estimateGas({ abi, to, from, value, args })
-     
-    return estimatedGas     
+
+    return estimatedGas
   }
 
   /**
@@ -58,7 +58,7 @@ export class CastHelpers {
    * @param params.to (optional) the address of the smart contract to call
    * @param params.origin (optional) the transaction origin source
    */
-  encodeABI = (params: Spells | EncodeAbiParams) => {
+  encodeABI = async (params: Spells | EncodeAbiParams) => {
     const defaults = {
       to: this.dsa.instance.address,
       origin: this.dsa.origin,
@@ -71,16 +71,16 @@ export class CastHelpers {
         `Please configure the DSA instance by calling dsa.setInstance(dsaId). More details: https://docs.instadapp.io/setup`
       )
 
-    
+
     const contract = new this.dsa.config.web3.eth.Contract(Abi.core.versions[this.dsa.instance.version].account, mergedParams.to)
 
-    const { targets, spells } = this.dsa.internal.encodeSpells(mergedParams.spells)
+    const { targets, spells } = await this.dsa.internal.encodeSpells(mergedParams.spells)
     //TODO @thrilok: check about return type.
     const encodedAbi: string = contract.methods.cast(targets, spells, mergedParams.origin).encodeABI()
     return encodedAbi
   }
 
-  
+
   flashBorrowSpellsConvert = (params: Spells): Spells => {
     const arr = params.data;
     const spellsLength = arr.length;
@@ -90,7 +90,7 @@ export class CastHelpers {
     let isFlashloanPool = false
     for (let i = 0; i < spellsLength; i++) {
       const a = arr[i];
-      if (a.connector === "instapool_v2" && a.method === "flashBorrow"  && !isFlashloanPool) {
+      if (a.connector === "instapool_v2" && a.method === "flashBorrow" && !isFlashloanPool) {
         isFlashloanPool = true
         flashBorrowArgs.push(...a.args)
         continue
@@ -122,7 +122,7 @@ export class CastHelpers {
         continue
       }
 
-      
+
       isFlashloanPool ? spells2.add(a) : spells.add(a)
     }
     return spells
